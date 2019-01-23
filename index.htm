@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+   <head>
+      <title>The Blackest Heart</title>
+      <script src="src/text_en.js"></script>
+      <script src="src/maps.js"></script>
+      <script src="src/game.js"></script>
+   </head>
+   <body onload="main();" style="background-color:black;">
+      <canvas id="layer1" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:1;"></canvas>
+      <canvas id="layer2" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:2;"></canvas>
+      <canvas id="layer3" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:3;"></canvas>
+      <canvas id="layer4" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:4;"></canvas>
+      <div style="display:none;">
+         <img id="altar"      src="gfx/altar.png">
+         <img id="assassin"   src="gfx/assassin.png">
+         <img id="beast"      src="gfx/beast.png">
+         <img id="birth"      src="gfx/birth.png">
+         <img id="blood"      src="gfx/blood.png">
+         <img id="corpse"     src="gfx/corpse.png">
+         <img id="demon"      src="gfx/demon.png">
+         <img id="exit"       src="gfx/exit.png">
+         <img id="fireball"   src="gfx/fireball.png">
+         <img id="flames"     src="gfx/flames.png">
+         <img id="fountain"   src="gfx/fountain.png">
+         <img id="fountain0"  src="gfx/fountain0.png">
+         <img id="gate"       src="gfx/gate.png">
+         <img id="gate0"      src="gfx/gate0.png">
+         <img id="golem"      src="gfx/golem.png">
+         <img id="ground"     src="gfx/ground.png">
+         <img id="ground0"    src="gfx/ground0.png">
+         <img id="healthbar"  src="gfx/healthbar.png">
+         <img id="healthbar0" src="gfx/healthbar0.png">
+         <img id="hex_reach"  src="gfx/hex_reach.png">
+         <img id="hex_select" src="gfx/hex_select.png">
+         <img id="hex_unsafe" src="gfx/hex_unsafe.png">
+         <img id="hud_cancel" src="gfx/hud_cancel.png">
+         <img id="hud_end"    src="gfx/hud_end.png">
+         <img id="hud_end0"   src="gfx/hud_end0.png">
+         <img id="hud_heal"   src="gfx/hud_heal.png">
+         <img id="hud_heal0"  src="gfx/hud_heal0.png">
+         <img id="hud_heal1"  src="gfx/hud_heal1.png">
+         <img id="hud_jump"   src="gfx/hud_jump.png">
+         <img id="hud_jump0"  src="gfx/hud_jump0.png">
+         <img id="hud_kick"   src="gfx/hud_kick.png">
+         <img id="hud_kick0"  src="gfx/hud_kick0.png">
+         <img id="hud_spell"  src="gfx/hud_spell.png">
+         <img id="hud_spell0" src="gfx/hud_spell0.png">
+         <img id="hud_stam"   src="gfx/hud_stam.png">
+         <img id="hud_stam0"  src="gfx/hud_stam0.png">
+         <img id="hud_sword"  src="gfx/hud_sword.png">
+         <img id="hud_sword0" src="gfx/hud_sword0.png">
+         <img id="hud_vit"    src="gfx/hud_vit.png">
+         <img id="hud_vit0"   src="gfx/hud_vit0.png">
+         <img id="hybrid"     src="gfx/hybrid.png">
+         <img id="knight"     src="gfx/knight.png">
+         <img id="lava"       src="gfx/lava.png">
+         <img id="lava0"      src="gfx/lava0.png">
+         <img id="lightning"  src="gfx/lightning.png">
+         <img id="lilith"     src="gfx/lilith.png">
+         <img id="minotaur"   src="gfx/minotaur.png">
+         <img id="rock"       src="gfx/rock.png">
+         <img id="rogue"      src="gfx/rogue.png">
+         <img id="shaman"     src="gfx/shaman.png">
+         <img id="skull"      src="gfx/skull.png">
+         <img id="smite"      src="gfx/smite.png">
+         <img id="spell"      src="gfx/spell.png">
+         <img id="splash"     src="gfx/splash.png">
+         <img id="star"       src="gfx/star.png">
+         <img id="switch"     src="gfx/switch.png">
+         <img id="switch0"    src="gfx/switch0.png">
+         <img id="vampire"    src="gfx/vampire.png">
+         <img id="wall"       src="gfx/wall.png">
+         <img id="wraith"     src="gfx/wraith.png">
+         <img id="zombie"     src="gfx/zombie.png">
+      </div>
+   </body>
+</html>

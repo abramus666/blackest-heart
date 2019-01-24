@@ -110,7 +110,6 @@ function createHexagon(map_chr, map_msg) {
       neighbors: [null, null, null, null, null, null],
       creature: null,
       effect: null,
-      visible: false,
       touch_id: 0
    };
    if (map_chr == '=') {
@@ -132,10 +131,10 @@ function createHexagon(map_chr, map_msg) {
       if (!hex.creature) {
          if      (map_chr == '@') {g_map.player_hex = hex;}
          else if (map_chr == '%') {g_map.spawn_points.push(hex);}
-         else if (map_chr == '^') {hex.effect = createAltar();}
-         else if (map_chr == '+') {hex.effect = createFountain();}
-         else if (map_chr == '/') {hex.effect = createSwitch();}
-         else if (map_chr == '!') {hex.effect = createExit();}
+         else if (map_chr == '^') {hex.effect = createAltar(hex);}
+         else if (map_chr == '+') {hex.effect = createFountain(hex);}
+         else if (map_chr == '/') {hex.effect = createSwitch(hex);}
+         else if (map_chr == '!') {hex.effect = createExit(hex);}
          else if (map_chr == '?') {hex.creature = createZombieSage(hex);}
          else if (map_chr != '.') {hex.creature = createZombieMsgr(hex, map_msg[map_chr]);}
       }
@@ -195,28 +194,38 @@ function setupHexCoords() {
          cur.x = 0;
          cur.y = 0;
       }
+      if (cur.kind == HEX_WALL) {
+         // Adjust coordinates for wall hexagons, which are higher.
+         // Altitude is needed for correct sorting of entities for drawing.
+         cur.altitude = 0;
+         cur.adjust_x = (HEX_WIDTH  - cur.img.width) / 2;
+         cur.adjust_y = (HEX_HEIGHT - cur.img.height);
+      }
    });
 }
 
 function initMap(level, map_str, map_msg, spawn_str) {
    g_map = {
-      level:            level,
-      map_string:       map_str,
-      map_messages:     map_msg,
-      spawn_strings:    spawn_str,
-      spawn_points:     [],
-      gates:            [],
-      candidate_hexes:  [],
-      visible_hexes:    [],
-      visible_walls:    [],
-      visible_entities: [],
-      active_entities:  [],
-      reachable_hexes:  [],
-      unsafe_hexes:     [],
-      unsafe_creature:  null,
-      selected_hex:     null,
-      player_hex:       null,
-      touch_id:         0
+      level:              level,
+      map_string:         map_str,
+      map_messages:       map_msg,
+      spawn_strings:      spawn_str,
+      spawn_points:       [],
+      gates:              [],
+      candidate_effects:  [],
+      candidate_entities: [],
+      candidate_floor:    [],
+      candidate_walls:    [],
+      visible_entities:   [],
+      visible_floor:      [],
+      visible_walls:      [],
+      active_entities:    [],
+      reachable_hexes:    [],
+      unsafe_hexes:       [],
+      unsafe_creature:    null,
+      selected_hex:       null,
+      player_hex:         null,
+      touch_id:           0
    };
    setupHexNeighbors(createHexDict(map_str, map_msg));
    setupHexCoords();
@@ -325,7 +334,7 @@ function generateMap(level) {
       map_str = FINAL_MAP;
    } else {
       if (g_mapstrings.length == 0) {
-         g_mapstrings = [MAP01];
+         g_mapstrings = [MAP1, MAP2];
       }
       var ix = randomIndex(g_mapstrings);
       map_str = g_mapstrings.splice(ix,1)[0]; // Remove random map string from the array.
@@ -578,13 +587,6 @@ function determinePathDistance(start_hex, end_hex, move_through_lava) {
 //    D R A W I N G    F U N C T I O N S
 //==============================================================================
 
-function isVisible(object) {
-   return (
-      object.view_x > -object.img.width  && object.view_x < VIEW_WIDTH &&
-      object.view_y > -object.img.height && object.view_y < VIEW_HEIGHT
-   );
-}
-
 //------------------------------------------------------------------------------
 // Perform animation. Call the given function for each animation frame, passing
 // animation position as the only argument. Animation position is in range from
@@ -611,25 +613,60 @@ function animate(duration, func) {
    window.requestAnimationFrame(tick);
 }
 
-//------------------------------------------------------------------------------
-// This function determines rough candidate hexagons for drawing during player
-// movement. We ignore image sizes of hexagons, creatures and effects. Instead,
-// we leave margins: One hexagon for left, right and top borders, and 3 hexagons
-// for bottom border (greater to compensate for creature and wall height).
-//------------------------------------------------------------------------------
 function determineCandidatesForDrawing(start_x, start_y, end_x, end_y) {
-   var left   = Math.min(start_x, end_x) - HEX_WIDTH * (SIGHT_DISTANCE + 2);
-   var right  = Math.max(start_x, end_x) + HEX_WIDTH * (SIGHT_DISTANCE + 2);
-   var top    = Math.min(start_y, end_y) - VERT_HEX_DELTA * SIGHT_DISTANCE - HEX_HEIGHT * 2;
-   var bottom = Math.max(start_y, end_y) + VERT_HEX_DELTA * SIGHT_DISTANCE + HEX_HEIGHT * 4;
-   g_map.candidate_hexes = [];
+   var left   = Math.min(start_x, end_x) - HEX_WIDTH * SIGHT_DISTANCE;
+   var right  = Math.max(start_x, end_x) + HEX_WIDTH * SIGHT_DISTANCE + HEX_WIDTH;
+   var top    = Math.min(start_y, end_y) - VERT_HEX_DELTA * SIGHT_DISTANCE;
+   var bottom = Math.max(start_y, end_y) + VERT_HEX_DELTA * SIGHT_DISTANCE + HEX_HEIGHT;
+   g_map.candidate_effects  = [];
+   g_map.candidate_entities = [];
+   g_map.candidate_floor    = [];
+   g_map.candidate_walls    = [];
    traverseMap([g_map.player_hex], function (hex, came_from) {
-      if (hex.x > left && hex.x < right && hex.y > top && hex.y < bottom) {
-         g_map.candidate_hexes.push(hex);
+      if (hex.kind == HEX_GROUND || hex.kind == HEX_LAVA) {
+         var effect_or_entity = false;
+         if (hex.effect) {
+            var x = hex.x + hex.effect.adjust_x;
+            var y = hex.y + hex.effect.adjust_y;
+            if ((x < right)  && (x + hex.effect.img.width  > left) &&
+                (y < bottom) && (y + hex.effect.img.height > top)) {
+               g_map.candidate_effects.push(hex.effect);
+               effect_or_entity = true;
+            }
+         }
+         if (hex.creature) {
+            var x = hex.x + hex.creature.adjust_x;
+            var y = hex.y + hex.creature.adjust_y;
+            if ((x < right)  && (x + hex.creature.img.width  > left) &&
+                (y < bottom) && (y + hex.creature.img.height > top)) {
+               g_map.candidate_entities.push(hex.creature);
+               effect_or_entity = true;
+            }
+         }
+         if ((hex.x < right)  && (hex.x + HEX_WIDTH  > left) &&
+             (hex.y < bottom) && (hex.y + HEX_HEIGHT > top)) {
+            g_map.candidate_floor.push(hex);
+         } else if (effect_or_entity) {
+            // This haxagon will not be rendered, but it needs
+            // to be there so that its view_x/view_y are updated.
+            g_map.candidate_floor.push(hex);
+         }
       } else {
-         hex.visible = false;
+         var x = hex.x + hex.adjust_x;
+         var y = hex.y + hex.adjust_y;
+         if ((x < right)  && (x + hex.img.width  > left) &&
+             (y < bottom) && (y + hex.img.height > top)) {
+            g_map.candidate_walls.push(hex);
+         }
       }
    });
+}
+
+function isVisible(object) {
+   return (
+      object.view_x > -object.img.width  && object.view_x < VIEW_WIDTH &&
+      object.view_y > -object.img.height && object.view_y < VIEW_HEIGHT
+   );
 }
 
 //------------------------------------------------------------------------------
@@ -664,77 +701,103 @@ function updateEntityViewInfo(entity, animate, anim_pos) {
       entity.view_x = entity.hex.view_x;
       entity.view_y = entity.hex.view_y;
    }
-   entity.view_x += (HEX_WIDTH - entity.img.width) / 2;
-   entity.view_y += (VERT_ENTITY_DELTA - entity.img.height);
+   entity.view_x = Math.floor(entity.view_x + entity.adjust_x);
+   entity.view_y = Math.floor(entity.view_y + entity.adjust_y);
    return isVisible(entity);
 }
 
-function updateEffectViewInfo(effect, hex) {
-   // Center the effect image over the ground image.
-   effect.view_x = hex.view_x + (hex.img.width  - effect.img.width)  / 2;
-   effect.view_y = hex.view_y + (hex.img.height - effect.img.height) / 2;
+function updateEffectViewInfo(effect) {
+   effect.view_x = Math.floor(effect.hex.view_x + effect.adjust_x);
+   effect.view_y = Math.floor(effect.hex.view_y + effect.adjust_y);
    return isVisible(effect);
 }
 
-function updateViewInfo(center_x, center_y) {
-   var new_visible_hexes = false;
-   var left = center_x - HEX_WIDTH * SIGHT_DISTANCE;
-   var top = center_y - VERT_HEX_DELTA * SIGHT_DISTANCE;
-   g_map.visible_hexes = [];
-   g_map.visible_walls = [];
-   g_map.visible_entities = [g_player];
-   g_map.candidate_hexes.forEach(function (hex) {
-      var was_visible = hex.visible;
-      hex.visible = false;
-      hex.view_x = hex.x - left;
-      hex.view_y = hex.y - top;
-      if (hex.kind == HEX_GROUND || hex.kind == HEX_LAVA) {
-         if (hex.creature && updateEntityViewInfo(hex.creature, false, 0)) {
-            g_map.visible_entities.push(hex.creature);
-         }
-         if (hex.effect && updateEffectViewInfo(hex.effect, hex)) {
-            hex.visible = true;
-            g_map.visible_hexes.push(hex);
-         } else if (isVisible(hex)) {
-            hex.visible = true;
-            g_map.visible_hexes.push(hex);
-         }
-      } else {
-         hex.altitude = 0; // Needed for correct sorting of entities for drawing.
-         hex.view_x += (HEX_WIDTH  - hex.img.width) / 2;
-         hex.view_y += (HEX_HEIGHT - hex.img.height);
-         if (isVisible(hex)) {
-            hex.visible = true;
-            g_map.visible_walls.push(hex);
-            g_map.visible_entities.push(hex);
-         }
-      }
-      if (hex.visible && !was_visible) {
-         new_visible_hexes = true;
-      }
-   });
-   return new_visible_hexes;
-}
-
-function updateViewInfoEntitiesOnly(anim_pos) {
-   g_map.visible_entities = g_map.visible_walls.slice();
-   g_map.visible_entities.push(g_player);
-   g_map.active_entities.forEach(function (entity) {
-      if (updateEntityViewInfo(entity, true, anim_pos)) {
-         g_map.visible_entities.push(entity);
-      }
-   });
-}
-
-function drawFloor() {
+function drawFloor(center_x, center_y) {
    var ctx = document.getElementById('layer1').getContext('2d');
+   var topleft_x = center_x - HEX_WIDTH * SIGHT_DISTANCE;
+   var topleft_y = center_y - VERT_HEX_DELTA * SIGHT_DISTANCE;
    ctx.clearRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
-   g_map.visible_hexes.forEach(function (hex) {
-      ctx.drawImage((hex.lineofsight ? hex.img : hex.img0), hex.view_x, hex.view_y);
+   for (var i = 0; i < g_map.candidate_floor.length; i++) {
+      var hex = g_map.candidate_floor[i];
+      hex.view_x = Math.floor(hex.x - topleft_x);
+      hex.view_y = Math.floor(hex.y - topleft_y);
+      if (hex.view_x > -HEX_WIDTH  && hex.view_x < VIEW_WIDTH &&
+          hex.view_y > -HEX_HEIGHT && hex.view_y < VIEW_HEIGHT) {
+         ctx.drawImage((hex.lineofsight ? hex.img : hex.img0), hex.view_x, hex.view_y);
+      }
+   }
+   g_map.candidate_effects.forEach(function (effect) {
+      if (effect.hex.lineofsight) {
+         if (updateEffectViewInfo(effect)) {
+            ctx.drawImage(effect.img, effect.view_x, effect.view_y);
+         }
+      }
    });
-   g_map.visible_hexes.forEach(function (hex) {
-      if (hex.effect && hex.lineofsight) {
-         ctx.drawImage(hex.effect.img, hex.effect.view_x, hex.effect.view_y);
+}
+
+//------------------------------------------------------------------------------
+// Update visible floor-level hexagons. Not used for drawing.
+//------------------------------------------------------------------------------
+function updateVisibleFloor() {
+   g_map.visible_floor = g_map.candidate_floor.filter(function (hex) {
+      return isVisible(hex);
+   });
+}
+
+//------------------------------------------------------------------------------
+// Update visible entities for drawing during player movement.
+// This includes walls and the player, which are all rendered together
+// as the correct order of drawing is required.
+//------------------------------------------------------------------------------
+function updateVisibleEntities(center_x, center_y) {
+   var topleft_x = center_x - HEX_WIDTH * SIGHT_DISTANCE;
+   var topleft_y = center_y - VERT_HEX_DELTA * SIGHT_DISTANCE;
+   g_map.visible_walls = g_map.candidate_walls.filter(function (hex) {
+      hex.view_x = Math.floor(hex.x + hex.adjust_x - topleft_x);
+      hex.view_y = Math.floor(hex.y + hex.adjust_y - topleft_y);
+      return isVisible(hex);
+   });
+   g_map.visible_entities = g_map.visible_walls.concat(
+      g_map.candidate_entities.filter(function (entity) {
+         return (!entity.dead && entity.hex.lineofsight && updateEntityViewInfo(entity, false, 0));
+      })
+   );
+   g_map.visible_entities.push(g_player);
+}
+
+//------------------------------------------------------------------------------
+// Update visible entities for drawing during enemy turn, and player actions
+// not involving movement. This function assumes that updateVisibleEntities
+// was called before to determine visible walls.
+//------------------------------------------------------------------------------
+function updateVisibleEntitiesAnim(anim_pos) {
+   g_map.visible_entities = g_map.visible_walls.concat(
+      g_map.active_entities.filter(function (entity) {
+         return (!entity.dead && entity.hex.lineofsight && updateEntityViewInfo(entity, true, anim_pos));
+      })
+   );
+   g_map.visible_entities.push(g_player);
+}
+
+//------------------------------------------------------------------------------
+// Draw entities. Calling updateVisibleEntities(Anim) first is required.
+//------------------------------------------------------------------------------
+function drawEntities() {
+   var ctx = document.getElementById('layer3').getContext('2d');
+   ctx.clearRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+   g_map.visible_entities.sort(function (a, b) {
+      var diff = (a.view_y + a.img.height + a.altitude) - (b.view_y + b.img.height + b.altitude);
+      if (diff == 0) {
+         // We want temporary entities to be on top.
+         if (a.temporary) {return +1;}
+         if (b.temporary) {return -1;}
+      }
+      return diff;
+   });
+   g_map.visible_entities.forEach(function (entity) {
+      ctx.drawImage(entity.img, entity.view_x, entity.view_y);
+      if (entity.wounds > 0 && !entity.hide_healthbar) {
+         drawHealthbar(ctx, entity);
       }
    });
 }
@@ -750,30 +813,6 @@ function drawHealthbar(ctx, creature) {
    var y = creature.view_y - img.height;
    ctx.drawImage(img,  0, 0, w,  img.height, x,   y, w,  img.height);
    ctx.drawImage(img0, w, 0, w0, img.height, x+w, y, w0, img.height);
-}
-
-function drawEntities() {
-   var ctx = document.getElementById('layer3').getContext('2d');
-   ctx.clearRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
-   g_map.visible_entities.sort(function (a, b) {
-      var diff = (a.view_y + a.img.height + a.altitude) - (b.view_y + b.img.height + b.altitude);
-      if (diff == 0) {
-         // We want temporary entities to be on top.
-         if (a.temporary) {return +1;}
-         if (b.temporary) {return -1;}
-      }
-      return diff;
-   });
-   g_map.visible_entities.forEach(function (entity) {
-      if (!entity.dead) {
-         if (!entity.hex || entity.hex.lineofsight) {
-            ctx.drawImage(entity.img, entity.view_x, entity.view_y);
-            if (entity.wounds > 0 && !entity.hide_healthbar) {
-               drawHealthbar(ctx, entity);
-            }
-         }
-      }
-   });
 }
 
 function drawReachableHexes(ctx) {
@@ -946,9 +985,10 @@ function drawMapFirstPass() {
    var x = g_map.player_hex.x;
    var y = g_map.player_hex.y;
    determineCandidatesForDrawing(x, y, x, y);
-   updateViewInfo(x, y);
    updateLineOfSightInfo();
-   drawFloor();
+   drawFloor(x, y);
+   updateVisibleFloor();
+   updateVisibleEntities(x, y);
    drawEntities();
    drawHUD();
 }
@@ -1095,7 +1135,7 @@ function doPlayerPostProcessing_EnemyTurn() {
       }
    }
    if (g_player.pending_effect && !enemy_turn) {
-      g_player.pending_effect.activate();
+      g_player.pending_effect.activate(g_player.pending_effect);
       g_player.pending_effect = null;
    }
 }
@@ -1117,7 +1157,7 @@ function doPlayerPostProcessing_EndFrame(continue_func) {
       if (thinkEntities()) {
          moveEntities();
       } else if (g_player.pending_effect) {
-         g_player.pending_effect.activate();
+         g_player.pending_effect.activate(g_player.pending_effect);
          g_player.pending_effect = null;
       } else if (continue_func) {
          continue_func();
@@ -1128,7 +1168,7 @@ function doPlayerPostProcessing_EndFrame(continue_func) {
 //------------------------------------------------------------------------------
 // Temporary entities are not displayed during player movement and melee attacks,
 // so we need to add a blood effect entity manually before drawing each frame.
-// This function must be called after updateViewInfo.
+// This function must be called after updateVisibleEntities.
 //------------------------------------------------------------------------------
 function doPlayerAttacks_createVisibleEntity(hex, img_name) {
    var entity = createEntity(hex, img_name, {});
@@ -1154,9 +1194,8 @@ function doPlayerAttacks() {
          playerDamageCreatureIfExists(hex.creature, DAMAGE_PHYSICAL, (1 + g_player.skills.sword));
          g_player.draw_splash = false;
       }
-      if (updateViewInfo(x, y)) {
-         updateLineOfSightInfo();
-      }
+      drawFloor(x, y);
+      updateVisibleEntities(x, y);
       if (anim_pos < 0.5) {
          // Splash effect from the player jumping on a creature, crushing it.
          if (g_player.draw_splash) {
@@ -1168,10 +1207,10 @@ function doPlayerAttacks() {
             doPlayerAttacks_createVisibleEntity(hex, 'blood');
          }
       }
-      drawFloor();
       drawEntities();
       drawHUD();
       if (anim_pos == 1.0) {
+         updateVisibleFloor();
          doPlayerPostProcessing_EndFrame(null);
       }
    });
@@ -1182,7 +1221,6 @@ function doPlayerMovement(target_hex, arc_height, continue_func) {
    var start_hex = g_map.player_hex;
    determineCandidatesForDrawing(start_hex.x, start_hex.y, target_hex.x, target_hex.y);
    animate(duration, function (anim_pos) {
-      var position_changed = false;
       var x = (1.0 - anim_pos) * start_hex.x + anim_pos * target_hex.x;
       var y = (1.0 - anim_pos) * start_hex.y + anim_pos * target_hex.y;
       if (anim_pos == 1.0) {
@@ -1205,17 +1243,16 @@ function doPlayerMovement(target_hex, arc_height, continue_func) {
       if (anim_pos >= 0.5 && g_map.player_hex !== target_hex) {
          // Change player position in the middle of movement.
          g_map.player_hex = target_hex;
-         position_changed = true;
+         updateLineOfSightInfo();
       }
       g_player.altitude = Math.sin(Math.PI * anim_pos) * arc_height;
       g_player.view_y = g_player.view_y_base - g_player.altitude;
-      if (updateViewInfo(x, y) || position_changed) {
-         updateLineOfSightInfo();
-      }
-      drawFloor();
+      drawFloor(x, y);
+      updateVisibleEntities(x, y);
       drawEntities();
       drawHUD();
       if (anim_pos == 1.0) {
+         updateVisibleFloor();
          doPlayerPostProcessing_EndFrame(continue_func);
       }
    });
@@ -1353,7 +1390,7 @@ function playerKick(target_hex) {
          });
          g_player.lava_kills = [];
       }
-      updateViewInfoEntitiesOnly(anim_pos);
+      updateVisibleEntitiesAnim(anim_pos);
       drawEntities();
       if (anim_pos == 1.0) {
          resetEntityAnimation();
@@ -1373,7 +1410,7 @@ function playerSpell(target_hex) {
          deleteTemporaryEntities();
          playerDamageCreatureIfExists(target_hex.creature, DAMAGE_MAGIC, (1 + g_player.skills.spell));
       }
-      updateViewInfoEntitiesOnly(anim_pos);
+      updateVisibleEntitiesAnim(anim_pos);
       drawEntities();
       if (anim_pos == 1.0) {
          doPlayerPostProcessing_EndFrame(null);
@@ -1440,11 +1477,11 @@ function removeHexesHiddenBehindWall(start_hex, hexes_to_check, wall_hex) {
 // floor-level (not walls) hexagons, which are not hidden behind any wall.
 //------------------------------------------------------------------------------
 function updateLineOfSightInfo() {
-   var hexes = g_map.visible_hexes;
+   var hexes = g_map.candidate_floor;
    hexes.forEach(function (hex) {
       hex.lineofsight = false;
    });
-   g_map.visible_walls.forEach(function (hex) {
+   g_map.candidate_walls.forEach(function (hex) {
       hexes = removeHexesHiddenBehindWall(g_map.player_hex, hexes, hex);
    });
    hexes.forEach(function (hex) {
@@ -1463,7 +1500,7 @@ function updateLineOfSightInfo() {
 function surroundingVisibleHexes(start_hex, max_distance) {
    var min_y = start_hex.y - (max_distance * VERT_HEX_DELTA);
    var max_y = start_hex.y + (max_distance * VERT_HEX_DELTA);
-   var hexes_to_check = g_map.visible_hexes;
+   var hexes_to_check = g_map.visible_floor;
    var hexes_in_range = [];
    for (var i = 0; i < hexes_to_check.length; i++) {
       var hex = hexes_to_check[i];
@@ -1526,6 +1563,18 @@ function playerReachableHexesForSpell() {
 //    E F F E C T    F U N C T I O N S
 //==============================================================================
 
+function createEffect(hex, img_name, activate_func) {
+   var self = {
+      hex: hex,
+      img: document.getElementById(img_name),
+      activate: activate_func
+   };
+   // Center the effect image over the ground image.
+   self.adjust_x = (HEX_WIDTH  - self.img.width)  / 2;
+   self.adjust_y = (HEX_HEIGHT - self.img.height) / 2;
+   return self;
+}
+
 function createLevelUpItem(img_name, attr_value, attr_info, upgrade_func) {
    if (attr_value >= 0 && attr_value < 3) {
       var name  = attr_info[0] + ' +' + (attr_value + 1).toString() + '\n';
@@ -1576,75 +1625,69 @@ function altarSpawnDemonicCreatures() {
       hex.creature = createDemonicCreature(hex);
       activateCreature(hex.creature);
    });
-   updateViewInfoEntitiesOnly();
+   updateVisibleEntities(g_map.player_hex.x, g_map.player_hex.y);
    drawEntities();
 }
 
-function createAltar() {
-   return {
-      img: document.getElementById('altar'),
-      activate: function () {
-         if (g_player.level >= g_map.level) {
-            g_player.message = TEXT.NO_EFFECT;
-            altarCheckDefilement(); // This function can overwrite the message.
-         } else {
-            g_hud.levelup = [
-               createLevelUpItem('hud_kick', g_player.skills.kick, TEXT.KICK_INFO, function () {
-                  g_player.skills.kick += 1;
-                  g_player.level = g_map.level;
-               }),
-               createLevelUpItem('hud_jump', g_player.skills.jump, TEXT.JUMP_INFO, function () {
-                  g_player.skills.jump += 1;
-                  g_player.level = g_map.level;
-               }),
-               createLevelUpItem('hud_spell', g_player.skills.spell, TEXT.SPELL_INFO, function () {
-                  g_player.skills.spell += 1;
-                  g_player.level = g_map.level;
-               }),
-               createLevelUpItem('hud_sword', g_player.skills.sword, TEXT.SWORD_INFO, function () {
-                  g_player.skills.sword += 1;
-                  g_player.level = g_map.level;
-               }),
-               createLevelUpItem('hud_vit', g_player.vitality, TEXT.VITALITY_INFO, function () {
-                  g_player.vitality   += 1;
-                  g_player.health     += 2;
-                  g_player.max_health += 2;
-                  g_player.level = g_map.level;
-               }),
-               createLevelUpItem('hud_end', g_player.endurance, TEXT.ENDURANCE_INFO, function () {
-                  g_player.endurance   += 1;
-                  g_player.stamina     += 2 * STAMINA_POINT;
-                  g_player.max_stamina += 2 * STAMINA_POINT;
-                  g_player.level = g_map.level;
-               }),
-               // A button with an "empty" function so that it is possible
-               // to exit level-up menu without actually upgrading anything.
-               {image: 'hud_cancel', info: TEXT.REJECT, message: TEXT.NO_EFFECT, func: altarCheckDefilement}
-            ];
-            configureLevelUpButtons();
-            lockInput();
-         }
-         drawHUD();
+function createAltar(hex) {
+   return createEffect(hex, 'altar', function (self) {
+      if (g_player.level >= g_map.level) {
+         g_player.message = TEXT.NO_EFFECT;
+         altarCheckDefilement(); // This function can overwrite the message.
+      } else {
+         g_hud.levelup = [
+            createLevelUpItem('hud_kick', g_player.skills.kick, TEXT.KICK_INFO, function () {
+               g_player.skills.kick += 1;
+               g_player.level = g_map.level;
+            }),
+            createLevelUpItem('hud_jump', g_player.skills.jump, TEXT.JUMP_INFO, function () {
+               g_player.skills.jump += 1;
+               g_player.level = g_map.level;
+            }),
+            createLevelUpItem('hud_spell', g_player.skills.spell, TEXT.SPELL_INFO, function () {
+               g_player.skills.spell += 1;
+               g_player.level = g_map.level;
+            }),
+            createLevelUpItem('hud_sword', g_player.skills.sword, TEXT.SWORD_INFO, function () {
+               g_player.skills.sword += 1;
+               g_player.level = g_map.level;
+            }),
+            createLevelUpItem('hud_vit', g_player.vitality, TEXT.VITALITY_INFO, function () {
+               g_player.vitality   += 1;
+               g_player.health     += 2;
+               g_player.max_health += 2;
+               g_player.level = g_map.level;
+            }),
+            createLevelUpItem('hud_end', g_player.endurance, TEXT.ENDURANCE_INFO, function () {
+               g_player.endurance   += 1;
+               g_player.stamina     += 2 * STAMINA_POINT;
+               g_player.max_stamina += 2 * STAMINA_POINT;
+               g_player.level = g_map.level;
+            }),
+            // A button with an "empty" function so that it is possible
+            // to exit level-up menu without actually upgrading anything.
+            {image: 'hud_cancel', info: TEXT.REJECT, message: TEXT.NO_EFFECT, func: altarCheckDefilement}
+         ];
+         configureLevelUpButtons();
+         lockInput();
       }
-   };
+      drawHUD();
+   });
 }
 
-function createFountain() {
-   var used = false;
-   var self = {img: document.getElementById('fountain')};
-   self.activate = function () {
-      if (used || g_player.health == g_player.max_health) {
+function createFountain(hex) {
+   return createEffect(hex, 'fountain', function (self) {
+      if (self.used || g_player.health == g_player.max_health) {
          g_player.message = TEXT.NO_EFFECT;
       } else {
-         used = true;
+         self.used = true;
          g_player.health = g_player.max_health;
          g_player.message = TEXT.HEALED;
          self.img = document.getElementById('fountain0');
-         drawFloor();
+         drawFloor(g_map.player_hex.x, g_map.player_hex.y);
       }
       drawHUD();
-   };
-   return self;
+   });
 }
 
 function switchOpenAllGates() {
@@ -1658,31 +1701,25 @@ function switchOpenAllGates() {
    drawMapFirstPass();
 }
 
-function createSwitch() {
-   var used = false;
-   var self = {img: document.getElementById('switch')};
-   self.activate = function () {
-      if (used) {
+function createSwitch(hex) {
+   return createEffect(hex, 'switch', function (self) {
+      if (self.used) {
          g_player.message = TEXT.NO_EFFECT;
       } else {
-         used = true;
+         self.used = true;
          g_player.message = TEXT.OPENED;
          self.img = document.getElementById('switch0');
          switchOpenAllGates();
       }
       drawHUD();
-   };
-   return self;
+   });
 }
 
-function createExit() {
-   return {
-      img: document.getElementById('exit'),
-      activate: function () {
-         generateMap(g_map.level + 1);
-         drawTransitionScreen();
-      }
-   };
+function createExit(hex) {
+   return createEffect(hex, 'exit', function (self) {
+      generateMap(g_map.level + 1);
+      drawTransitionScreen();
+   });
 }
 
 //==============================================================================
@@ -1694,6 +1731,8 @@ function createEntity(hex, img_name, properties) {
    self.name      = img_name;
    self.hex       = hex;
    self.img       = document.getElementById(img_name);
+   self.adjust_x  = (HEX_WIDTH - self.img.width) / 2;
+   self.adjust_y  = (VERT_ENTITY_DELTA - self.img.height);
    self.view_x    = 0;
    self.view_y    = 0;
    self.altitude  = 0;
@@ -1779,7 +1818,7 @@ function moveEntities() {
          resetEntityAnimation();
          doPlayerPostProcessing_EnemyTurn();
       }
-      updateViewInfoEntitiesOnly(anim_pos);
+      updateVisibleEntitiesAnim(anim_pos);
       drawEntities();
    });
 }
@@ -2682,8 +2721,8 @@ function updateSelectedHexagon() {
    var x = g_mousepos.x;
    var y = g_mousepos.y;
    g_map.selected_hex = null;
-   for (var i = 0; i < g_map.visible_hexes.length && !g_map.selected_hex; i++) {
-      var cur = g_map.visible_hexes[i];
+   for (var i = 0; i < g_map.visible_floor.length && !g_map.selected_hex; i++) {
+      var cur = g_map.visible_floor[i];
       if (x >= cur.view_x && x < cur.view_x + HEX_WIDTH &&
           y >= cur.view_y && y < cur.view_y + HEX_HEIGHT) {
          // We need additional check when the given coordinates point to the
@@ -2709,9 +2748,6 @@ function updateSelectedHexagon() {
             }
          } else {
             g_map.selected_hex = cur;
-         }
-         if (cur.kind == HEX_WALL) {
-            g_map.selected_hex = null;
          }
       }
    }
@@ -2789,7 +2825,7 @@ function updateUnsafeHexes(target_hex) {
       g_map.unsafe_hexes = [];
    } else {
       g_map.unsafe_creature = creature;
-      g_map.unsafe_hexes = g_map.visible_hexes.filter(function (hex) {
+      g_map.unsafe_hexes = g_map.visible_floor.filter(function (hex) {
          return creature.can_attack(creature, hex);
       });
    }

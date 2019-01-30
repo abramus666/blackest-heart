@@ -78,6 +78,7 @@ var ACTION_SPELL   = 3;
 
 var HEX_WIDTH, HEX_HEIGHT, VERT_HEX_DELTA, VERT_ENTITY_DELTA, VIEW_WIDTH, VIEW_HEIGHT;
 
+var g_camera     = {adjust_x:0, adjust_y:0};
 var g_mousepos   = {x:0, y:0};
 var g_inputlock  = false;
 var g_map        = null;
@@ -115,10 +116,14 @@ function createHexagon(map_chr, map_msg) {
    if (map_chr == '=') {
       g_map.gates.push(hex);
       hex.kind = HEX_WALL;
-      hex.img = document.getElementById('gate');
+      hex.img  = document.getElementById('gate');
+      hex.img0 = hex.img;
+      hex.img1 = hex.img;
    } else if (map_chr == '#') {
       hex.kind = HEX_WALL;
-      hex.img = document.getElementById('wall');
+      hex.img  = document.getElementById('wall');
+      hex.img0 = document.getElementById('wall0');
+      hex.img1 = hex.img;
    } else if (map_chr == '_') {
       hex.kind = HEX_LAVA;
       hex.img  = document.getElementById('lava');
@@ -334,7 +339,7 @@ function generateMap(level) {
       map_str = FINAL_MAP;
    } else {
       if (g_mapstrings.length == 0) {
-         g_mapstrings = [MAP1, MAP2];
+         g_mapstrings = [MAP1, MAP2, MAP3, MAP4, MAP5, MAP6, MAP7, MAP8, MAP9];
       }
       var ix = randomIndex(g_mapstrings);
       map_str = g_mapstrings.splice(ix,1)[0]; // Remove random map string from the array.
@@ -624,14 +629,12 @@ function determineCandidatesForDrawing(start_x, start_y, end_x, end_y) {
    g_map.candidate_walls    = [];
    traverseMap([g_map.player_hex], function (hex, came_from) {
       if (hex.kind == HEX_GROUND || hex.kind == HEX_LAVA) {
-         var effect_or_entity = false;
          if (hex.effect) {
             var x = hex.x + hex.effect.adjust_x;
             var y = hex.y + hex.effect.adjust_y;
             if ((x < right)  && (x + hex.effect.img.width  > left) &&
                 (y < bottom) && (y + hex.effect.img.height > top)) {
                g_map.candidate_effects.push(hex.effect);
-               effect_or_entity = true;
             }
          }
          if (hex.creature) {
@@ -640,15 +643,10 @@ function determineCandidatesForDrawing(start_x, start_y, end_x, end_y) {
             if ((x < right)  && (x + hex.creature.img.width  > left) &&
                 (y < bottom) && (y + hex.creature.img.height > top)) {
                g_map.candidate_entities.push(hex.creature);
-               effect_or_entity = true;
             }
          }
          if ((hex.x < right)  && (hex.x + HEX_WIDTH  > left) &&
              (hex.y < bottom) && (hex.y + HEX_HEIGHT > top)) {
-            g_map.candidate_floor.push(hex);
-         } else if (effect_or_entity) {
-            // This haxagon will not be rendered, but it needs
-            // to be there so that its view_x/view_y are updated.
             g_map.candidate_floor.push(hex);
          }
       } else {
@@ -662,6 +660,28 @@ function determineCandidatesForDrawing(start_x, start_y, end_x, end_y) {
    });
 }
 
+//------------------------------------------------------------------------------
+// Make a wall half-transparent if there is a creature or the player behind it.
+//------------------------------------------------------------------------------
+function updateTransparencyOfWalls() {
+   g_map.candidate_walls.forEach(function (hex) {
+      var hex1 = hex.neighbors[DIR_NW];
+      var hex2 = hex.neighbors[DIR_NE];
+      if (hex1 && ((hex1.creature && hex1.lineofsight) || hex1 === g_map.player_hex)) {
+         hex.img = hex.img0;
+      } else if (hex2 && ((hex2.creature && hex2.lineofsight) || hex2 === g_map.player_hex)) {
+         hex.img = hex.img0;
+      } else {
+         hex.img = hex.img1;
+      }
+   });
+}
+
+function updateCamera(center_x, center_y) {
+   g_camera.adjust_x = -center_x + HEX_WIDTH * SIGHT_DISTANCE;
+   g_camera.adjust_y = -center_y + VERT_HEX_DELTA * SIGHT_DISTANCE;
+}
+
 function isVisible(object) {
    return (
       object.view_x > -object.img.width  && object.view_x < VIEW_WIDTH &&
@@ -669,9 +689,15 @@ function isVisible(object) {
    );
 }
 
+function updateEffectViewInfo(effect) {
+   effect.view_x = Math.floor(effect.hex.x + effect.adjust_x + g_camera.adjust_x);
+   effect.view_y = Math.floor(effect.hex.y + effect.adjust_y + g_camera.adjust_y);
+   return isVisible(effect);
+}
+
 //------------------------------------------------------------------------------
-// Update the entity view coordinates based on its requested animation, or view
-// coordinates of the hexagon it is located in if no animation is defined.
+// Update the entity view coordinates based on its requested animation,
+// or coordinates of the hexagon it is located in if no animation is defined.
 // Return boolean value indicating whether the entity is visible or not.
 //
 // Animation is a table of numbers, with the following format:
@@ -694,33 +720,62 @@ function updateEntityViewInfo(entity, animate, anim_pos) {
       var x2 = entity.animation[ix+3];
       var y2 = entity.animation[ix+4];
       entity.altitude = Math.sin(Math.PI * pos) * h;
-      entity.view_x = (1.0 - pos) * x1 + pos * x2;
-      entity.view_y = (1.0 - pos) * y1 + pos * y2 - entity.altitude;
+      entity.x = (1.0 - pos) * x1 + pos * x2;
+      entity.y = (1.0 - pos) * y1 + pos * y2 - entity.altitude;
    } else {
       entity.altitude = 0;
-      entity.view_x = entity.hex.view_x;
-      entity.view_y = entity.hex.view_y;
+      entity.x = entity.hex.x;
+      entity.y = entity.hex.y;
    }
-   entity.view_x = Math.floor(entity.view_x + entity.adjust_x);
-   entity.view_y = Math.floor(entity.view_y + entity.adjust_y);
+   entity.view_x = Math.floor(entity.x + entity.adjust_x + g_camera.adjust_x);
+   entity.view_y = Math.floor(entity.y + entity.adjust_y + g_camera.adjust_y);
    return isVisible(entity);
 }
 
-function updateEffectViewInfo(effect) {
-   effect.view_x = Math.floor(effect.hex.view_x + effect.adjust_x);
-   effect.view_y = Math.floor(effect.hex.view_y + effect.adjust_y);
-   return isVisible(effect);
+//------------------------------------------------------------------------------
+// Update visible floor-level hexagons. Not used for drawing.
+//------------------------------------------------------------------------------
+function updateVisibleFloor() {
+   g_map.visible_floor = g_map.candidate_floor.filter(function (hex) {
+      hex.view_x = Math.floor(hex.x + g_camera.adjust_x);
+      hex.view_y = Math.floor(hex.y + g_camera.adjust_y);
+      return isVisible(hex);
+   });
 }
 
-function drawFloor(center_x, center_y) {
+//------------------------------------------------------------------------------
+// Update visible entities for drawing during player movement
+// (when animate is false) or during enemy turn (when animate is true).
+// Visible entities include walls and the player, which are all rendered
+// together as the correct order of drawing is required.
+//------------------------------------------------------------------------------
+function updateVisibleEntities(animate, anim_pos) {
+   var entities_to_check;
+   if (!animate) {
+      g_map.visible_walls = g_map.candidate_walls.filter(function (hex) {
+         hex.view_x = Math.floor(hex.x + hex.adjust_x + g_camera.adjust_x);
+         hex.view_y = Math.floor(hex.y + hex.adjust_y + g_camera.adjust_y);
+         return isVisible(hex);
+      });
+      entities_to_check = g_map.candidate_entities;
+   } else {
+      entities_to_check = g_map.active_entities;
+   }
+   g_map.visible_entities = g_map.visible_walls.concat(
+      entities_to_check.filter(function (entity) {
+         return (!entity.dead && entity.hex.lineofsight && updateEntityViewInfo(entity, animate, anim_pos));
+      })
+   );
+   g_map.visible_entities.push(g_player);
+}
+
+function drawFloor() {
    var ctx = document.getElementById('layer1').getContext('2d');
-   var topleft_x = center_x - HEX_WIDTH * SIGHT_DISTANCE;
-   var topleft_y = center_y - VERT_HEX_DELTA * SIGHT_DISTANCE;
    ctx.clearRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
    for (var i = 0; i < g_map.candidate_floor.length; i++) {
       var hex = g_map.candidate_floor[i];
-      hex.view_x = Math.floor(hex.x - topleft_x);
-      hex.view_y = Math.floor(hex.y - topleft_y);
+      hex.view_x = Math.floor(hex.x + g_camera.adjust_x);
+      hex.view_y = Math.floor(hex.y + g_camera.adjust_y);
       if (hex.view_x > -HEX_WIDTH  && hex.view_x < VIEW_WIDTH &&
           hex.view_y > -HEX_HEIGHT && hex.view_y < VIEW_HEIGHT) {
          ctx.drawImage((hex.lineofsight ? hex.img : hex.img0), hex.view_x, hex.view_y);
@@ -736,51 +791,7 @@ function drawFloor(center_x, center_y) {
 }
 
 //------------------------------------------------------------------------------
-// Update visible floor-level hexagons. Not used for drawing.
-//------------------------------------------------------------------------------
-function updateVisibleFloor() {
-   g_map.visible_floor = g_map.candidate_floor.filter(function (hex) {
-      return isVisible(hex);
-   });
-}
-
-//------------------------------------------------------------------------------
-// Update visible entities for drawing during player movement.
-// This includes walls and the player, which are all rendered together
-// as the correct order of drawing is required.
-//------------------------------------------------------------------------------
-function updateVisibleEntities(center_x, center_y) {
-   var topleft_x = center_x - HEX_WIDTH * SIGHT_DISTANCE;
-   var topleft_y = center_y - VERT_HEX_DELTA * SIGHT_DISTANCE;
-   g_map.visible_walls = g_map.candidate_walls.filter(function (hex) {
-      hex.view_x = Math.floor(hex.x + hex.adjust_x - topleft_x);
-      hex.view_y = Math.floor(hex.y + hex.adjust_y - topleft_y);
-      return isVisible(hex);
-   });
-   g_map.visible_entities = g_map.visible_walls.concat(
-      g_map.candidate_entities.filter(function (entity) {
-         return (!entity.dead && entity.hex.lineofsight && updateEntityViewInfo(entity, false, 0));
-      })
-   );
-   g_map.visible_entities.push(g_player);
-}
-
-//------------------------------------------------------------------------------
-// Update visible entities for drawing during enemy turn, and player actions
-// not involving movement. This function assumes that updateVisibleEntities
-// was called before to determine visible walls.
-//------------------------------------------------------------------------------
-function updateVisibleEntitiesAnim(anim_pos) {
-   g_map.visible_entities = g_map.visible_walls.concat(
-      g_map.active_entities.filter(function (entity) {
-         return (!entity.dead && entity.hex.lineofsight && updateEntityViewInfo(entity, true, anim_pos));
-      })
-   );
-   g_map.visible_entities.push(g_player);
-}
-
-//------------------------------------------------------------------------------
-// Draw entities. Calling updateVisibleEntities(Anim) first is required.
+// Draw entities. Calling updateVisibleEntities first is required.
 //------------------------------------------------------------------------------
 function drawEntities() {
    var ctx = document.getElementById('layer3').getContext('2d');
@@ -986,9 +997,11 @@ function drawMapFirstPass() {
    var y = g_map.player_hex.y;
    determineCandidatesForDrawing(x, y, x, y);
    updateLineOfSightInfo();
-   drawFloor(x, y);
+   updateTransparencyOfWalls();
+   updateCamera(x, y);
    updateVisibleFloor();
-   updateVisibleEntities(x, y);
+   updateVisibleEntities(false, 0);
+   drawFloor();
    drawEntities();
    drawHUD();
 }
@@ -1183,6 +1196,8 @@ function doPlayerAttacks() {
    var x2 = (x1 * (1.0 - ANIM_MELEE_RATIO) + hex.x * ANIM_MELEE_RATIO);
    var y2 = (y1 * (1.0 - ANIM_MELEE_RATIO) + hex.y * ANIM_MELEE_RATIO);
    determineCandidatesForDrawing(x1, y1, x2, y2);
+   updateLineOfSightInfo();
+   updateTransparencyOfWalls();
    animate(ANIM_MELEE_TIME, function (anim_pos) {
       var pos = anim_pos * 2.0;
       if (pos > 1.0) {
@@ -1194,8 +1209,8 @@ function doPlayerAttacks() {
          playerDamageCreatureIfExists(hex.creature, DAMAGE_PHYSICAL, (1 + g_player.skills.sword));
          g_player.draw_splash = false;
       }
-      drawFloor(x, y);
-      updateVisibleEntities(x, y);
+      updateCamera(x, y);
+      updateVisibleEntities(false, 0);
       if (anim_pos < 0.5) {
          // Splash effect from the player jumping on a creature, crushing it.
          if (g_player.draw_splash) {
@@ -1207,6 +1222,7 @@ function doPlayerAttacks() {
             doPlayerAttacks_createVisibleEntity(hex, 'blood');
          }
       }
+      drawFloor();
       drawEntities();
       drawHUD();
       if (anim_pos == 1.0) {
@@ -1220,6 +1236,8 @@ function doPlayerMovement(target_hex, arc_height, continue_func) {
    var duration = (arc_height > 0) ? ANIM_DEFAULT_TIME : ANIM_WALK_TIME;
    var start_hex = g_map.player_hex;
    determineCandidatesForDrawing(start_hex.x, start_hex.y, target_hex.x, target_hex.y);
+   updateLineOfSightInfo();
+   updateTransparencyOfWalls();
    animate(duration, function (anim_pos) {
       var x = (1.0 - anim_pos) * start_hex.x + anim_pos * target_hex.x;
       var y = (1.0 - anim_pos) * start_hex.y + anim_pos * target_hex.y;
@@ -1244,11 +1262,13 @@ function doPlayerMovement(target_hex, arc_height, continue_func) {
          // Change player position in the middle of movement.
          g_map.player_hex = target_hex;
          updateLineOfSightInfo();
+         updateTransparencyOfWalls();
       }
       g_player.altitude = Math.sin(Math.PI * anim_pos) * arc_height;
       g_player.view_y = g_player.view_y_base - g_player.altitude;
-      drawFloor(x, y);
-      updateVisibleEntities(x, y);
+      updateCamera(x, y);
+      updateVisibleEntities(false, 0);
+      drawFloor();
       drawEntities();
       drawHUD();
       if (anim_pos == 1.0) {
@@ -1389,8 +1409,9 @@ function playerKick(target_hex) {
             playerDamageCreatureIfExists(creature, DAMAGE_FIRE, 999);
          });
          g_player.lava_kills = [];
+         updateTransparencyOfWalls();
       }
-      updateVisibleEntitiesAnim(anim_pos);
+      updateVisibleEntities(true, anim_pos);
       drawEntities();
       if (anim_pos == 1.0) {
          resetEntityAnimation();
@@ -1409,8 +1430,9 @@ function playerSpell(target_hex) {
       if (anim_pos == 1.0) {
          deleteTemporaryEntities();
          playerDamageCreatureIfExists(target_hex.creature, DAMAGE_MAGIC, (1 + g_player.skills.spell));
+         updateTransparencyOfWalls();
       }
-      updateVisibleEntitiesAnim(anim_pos);
+      updateVisibleEntities(true, anim_pos);
       drawEntities();
       if (anim_pos == 1.0) {
          doPlayerPostProcessing_EndFrame(null);
@@ -1625,7 +1647,8 @@ function altarSpawnDemonicCreatures() {
       hex.creature = createDemonicCreature(hex);
       activateCreature(hex.creature);
    });
-   updateVisibleEntities(g_map.player_hex.x, g_map.player_hex.y);
+   updateTransparencyOfWalls();
+   updateVisibleEntities(true, 0);
    drawEntities();
 }
 
@@ -1684,7 +1707,7 @@ function createFountain(hex) {
          g_player.health = g_player.max_health;
          g_player.message = TEXT.HEALED;
          self.img = document.getElementById('fountain0');
-         drawFloor(g_map.player_hex.x, g_map.player_hex.y);
+         drawFloor();
       }
       drawHUD();
    });
@@ -1733,9 +1756,6 @@ function createEntity(hex, img_name, properties) {
    self.img       = document.getElementById(img_name);
    self.adjust_x  = (HEX_WIDTH - self.img.width) / 2;
    self.adjust_y  = (VERT_ENTITY_DELTA - self.img.height);
-   self.view_x    = 0;
-   self.view_y    = 0;
-   self.altitude  = 0;
    self.activated = false;
    self.dead      = false;
    self.suicide   = false;
@@ -1815,10 +1835,11 @@ function moveEntities() {
       if (anim_pos == 1.0) {
          deleteDeadEntities();
          deleteTemporaryEntities();
+         updateTransparencyOfWalls();
          resetEntityAnimation();
          doPlayerPostProcessing_EnemyTurn();
       }
-      updateVisibleEntitiesAnim(anim_pos);
+      updateVisibleEntities(true, anim_pos);
       drawEntities();
    });
 }
@@ -1870,9 +1891,9 @@ function createTemporaryEntity(hex, img_name) {
 
 function createProjectileNoBlood(start_hex, end_hex, arc_height, img_name) {
    var projectile = createTemporaryEntity(end_hex, img_name);
-   projectile.animation = [start_hex.view_x, start_hex.view_y];
-   projectile.animation.push(arc_height, end_hex.view_x, end_hex.view_y);
-   projectile.animation.push(0,          end_hex.view_x, end_hex.view_y);
+   projectile.animation = [start_hex.x, start_hex.y];
+   projectile.animation.push(arc_height, end_hex.x, end_hex.y);
+   projectile.animation.push(0,          end_hex.x, end_hex.y);
    projectile.hide_pos = 0.5;
    return projectile;
 }
@@ -1891,9 +1912,9 @@ function createBlood(hex, parent_entity) {
 function creatureMove(self, target_hex) {
    if (target_hex && !target_hex.creature && target_hex !== g_map.player_hex) {
       if (self.animation.length == 0) {
-         self.animation = [self.hex.view_x, self.hex.view_y];
+         self.animation = [self.hex.x, self.hex.y];
       }
-      self.animation.push(0, target_hex.view_x, target_hex.view_y);
+      self.animation.push(0, target_hex.x, target_hex.y);
       if (self.hex.creature === self) {
          self.hex.creature = null;
       }
@@ -1904,24 +1925,24 @@ function creatureMove(self, target_hex) {
 
 function creatureMeleeAttack(self, target_hex) {
    if (self.animation.length == 0) {
-      self.animation = [self.hex.view_x, self.hex.view_y];
+      self.animation = [self.hex.x, self.hex.y];
    }
    self.animation.push(0);
-   self.animation.push(self.hex.view_x * (1.0 - ANIM_MELEE_RATIO) + target_hex.view_x * ANIM_MELEE_RATIO);
-   self.animation.push(self.hex.view_y * (1.0 - ANIM_MELEE_RATIO) + target_hex.view_y * ANIM_MELEE_RATIO);
+   self.animation.push(self.hex.x * (1.0 - ANIM_MELEE_RATIO) + target_hex.x * ANIM_MELEE_RATIO);
+   self.animation.push(self.hex.y * (1.0 - ANIM_MELEE_RATIO) + target_hex.y * ANIM_MELEE_RATIO);
    self.animation.push(0);
-   self.animation.push(self.hex.view_x);
-   self.animation.push(self.hex.view_y);
+   self.animation.push(self.hex.x);
+   self.animation.push(self.hex.y);
    createBlood(target_hex, self);
 }
 
 function creatureJumpAttack(self, target_hex, end_hex) {
    if (self.animation.length == 0) {
-      self.animation = [self.hex.view_x, self.hex.view_y];
+      self.animation = [self.hex.x, self.hex.y];
    }
    self.animation.push(ANIM_ARC_HEIGHT * HEX_HEIGHT);
-   self.animation.push(end_hex.view_x * (1.0 - ANIM_MELEE_RATIO) + target_hex.view_x * ANIM_MELEE_RATIO);
-   self.animation.push(end_hex.view_y * (1.0 - ANIM_MELEE_RATIO) + target_hex.view_y * ANIM_MELEE_RATIO);
+   self.animation.push(end_hex.x * (1.0 - ANIM_MELEE_RATIO) + target_hex.x * ANIM_MELEE_RATIO);
+   self.animation.push(end_hex.y * (1.0 - ANIM_MELEE_RATIO) + target_hex.y * ANIM_MELEE_RATIO);
    creatureMove(self, end_hex, 0);
    createBlood(target_hex, self);
 }
@@ -1976,7 +1997,9 @@ function thinkMinotaur(self) {
       creatureMeleeAttack(self, g_map.player_hex);
       damagePlayer();
    } else {
-      updatePathInfo(determineStartingHexes(0, 0, unavailableForMinotaur), false);
+      // Reverse the order of hexagons to prioritize positions nearer to the player.
+      var starting_hexes = determineStartingHexes(0, 0, unavailableForMinotaur);
+      updatePathInfo(starting_hexes.reverse(), false);
       creatureMove(self, pathInfoCameFrom(self.hex, true));
    }
 }
@@ -2025,7 +2048,9 @@ function thinkVampire(self) {
       }
       damagePlayer();
    } else {
-      updatePathInfo(determineStartingHexes(0, 0, createUnavailableForVampire(g_map.player_hex)), false);
+      // Reverse the order of hexagons to prioritize positions nearer to the player.
+      var starting_hexes = determineStartingHexes(0, 0, createUnavailableForVampire(g_map.player_hex));
+      updatePathInfo(starting_hexes.reverse(), false);
       for (var i = 0; i < VAMPIRE_SPEED; i++) {
          creatureMove(self, pathInfoCameFrom(self.hex, true));
       }
@@ -2709,8 +2734,6 @@ function lockInput() {
 
 function unlockInput() {
    g_inputlock = false;
-   updateSelectedHexagon();
-   drawHighlight();
 }
 
 //------------------------------------------------------------------------------
@@ -2784,9 +2807,6 @@ function processButtonPressed() {
       // any target hexagon. Perform the kick right away.
       if (g_hud.action == ACTION_KICK && g_player.skills.kick >= 3) {
          performPlayerAction(g_map.reachable_hexes[0]);
-      } else {
-         drawHighlight();
-         drawHUD();
       }
    } else {
       g_hud.action = ACTION_DEFAULT;
@@ -2806,14 +2826,12 @@ function performPlayerAction(target_hex) {
       else if (g_hud.action == ACTION_SPELL) {playerSpell(target_hex);}
       g_player.stamina -= STAMINA_POINT;
       g_hud.action = ACTION_DEFAULT;
-      drawHUD();
       action_done = true;
    }
    if (action_done) {
       g_map.reachable_hexes = [];
       g_map.unsafe_hexes    = [];
       g_map.unsafe_creature = null;
-      drawHighlight();
    }
    return action_done;
 }
@@ -2829,7 +2847,6 @@ function updateUnsafeHexes(target_hex) {
          return creature.can_attack(creature, hex);
       });
    }
-   drawHighlight();
 }
 
 //------------------------------------------------------------------------------
@@ -2871,11 +2888,17 @@ function mouseclick(evt) {
    } else if (!g_inputlock) {
       if (checkButtonPressed()) {
          processButtonPressed();
-      } else if (g_map.selected_hex) {
-         if (!performPlayerAction(g_map.selected_hex)) {
-            updateUnsafeHexes(g_map.selected_hex);
+      } else {
+         updateSelectedHexagon();
+         if (g_map.selected_hex) {
+            if (!performPlayerAction(g_map.selected_hex)) {
+               updateUnsafeHexes(g_map.selected_hex);
+            }
+            g_map.selected_hex = null;
          }
       }
+      drawHighlight();
+      drawHUD();
    }
 }
 

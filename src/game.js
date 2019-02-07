@@ -1318,9 +1318,10 @@ function determinePlayerKickDirections(target_hex) {
       }
    } else {
       // Spinning kick hits all nearby opponents.
-      dirs = g_map.player_hex.neighbors.filter(function (hex) {
-         return (hex && hex.kind != HEX_WALL);
-      });
+      for (dir = 0; dir < NUM_DIRS; dir++) {
+         var hex = g_map.player_hex.neighbors[dir];
+         if (hex && hex.kind != HEX_WALL) {dirs.push(dir);}
+      }
    }
    return dirs;
 }

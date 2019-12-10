@@ -1,6 +1,11 @@
 {
    "short_name": "BH",
    "name": "The Blackest Heart",
+   "start_url": "/blackest-heart/",
+   "background_color": "#000000",
+   "display": "fullscreen",
+   "orientation": "landscape",
+   "theme_color": "#281F1A"
    "icons": [
       {
          "src": "/gfx/icon192.png",
@@ -12,10 +17,5 @@
          "type": "image/png",
          "sizes": "512x512"
       }
-   ],
-   "start_url": "/blackest-heart/",
-   "background_color": "#000000",
-   "display": "fullscreen",
-   "orientation": "landscape",
-   "theme_color": "#281F1A"
+   ]
 }

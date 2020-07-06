@@ -2,6 +2,20 @@
 <html>
    <head>
       <title>The Blackest Heart</title>
+      <style>
+         canvas {
+            padding: 0;
+            margin: auto;
+            display: block;
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+         }
+      </style>
       <link rel="icon" href="gfx/icon192.png">
       <link rel="manifest" href="manifest.json">
       <script src="src/text_en.js"></script>
@@ -9,10 +23,10 @@
       <script src="src/game.js"></script>
    </head>
    <body onload="main();" style="background-color:black;">
-      <canvas id="layer1" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:1;"></canvas>
-      <canvas id="layer2" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:2;"></canvas>
-      <canvas id="layer3" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:3;"></canvas>
-      <canvas id="layer4" style="padding:0; margin:auto; display:block; position:absolute; left:0; top:0; right:0; bottom:0; z-index:4;"></canvas>
+      <canvas id="layer1" style="z-index:1;"></canvas>
+      <canvas id="layer2" style="z-index:2;"></canvas>
+      <canvas id="layer3" style="z-index:3;"></canvas>
+      <canvas id="layer4" style="z-index:4;"></canvas>
       <div style="display:none;">
          <img id="altar"      src="gfx/altar.png">
          <img id="assassin"   src="gfx/assassin.png">

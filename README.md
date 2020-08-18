@@ -1,4 +1,5 @@
-# [The Blackest Heart](https://abramus666.github.io/blackest-heart/)
+# The Blackest Heart
+[Click to run the game](https://abramus666.github.io/blackest-heart/)
 
 Turn-based dungeon crawler with combat mechanics putting emphasis on movement based attacks, inspired by great mobile game Hoplite.
 
